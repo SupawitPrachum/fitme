@@ -1,0 +1,250 @@
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    } catch {
+      return new Date().toDateString();
+    }
+  }, []);
+
+  const getGoalInThai = (goal?: string | null): string => {
+    const goalMap: { [key: string]: string } = {
+      lose_weight: 'ลดน้ำหนัก',
+      gain_weight: 'เพิ่มน้ำหนัก',
+      maintain_weight: 'รักษาน้ำหนัก',
+      build_muscle: 'สร้างกล้ามเนื้อ',
+      improve_health: 'ปรับปรุงสุขภาพ',
+      maintain_shape: 'รักษารูปร่าง',
+      general_fitness: 'ฟิตเนสทั่วไป',
+      maintain_health: 'รักษาสุขภาพ',
+    };
+    return goal ? goalMap[goal] ?? 'ปรับปรุงสุขภาพ' : 'ปรับปรุงสุขภาพ';
+  };
+
+  const roleLabel = userProfile?.is_admin ? 'ผู้ดูแลระบบ (Admin)' : 'ผู้ใช้ทั่วไป';
+  const roleStyle = userProfile?.is_admin ? styles.adminBadge : styles.userBadge;
+
+  type QuickActionCardProps = {
+    title: string;
+    subtitle?: string;
+    icon: string;
+    color: string;
+    onPress: () => void;
+    isLarge?: boolean;
+  };
+
+  const QuickActionCard = ({ title, subtitle, icon, color, onPress, isLarge = false }: QuickActionCardProps) => {
+    const cardStyle = isLarge
+      ? [styles.quickActionCardBase, styles.quickActionCardLarge, styles.largeCard, { backgroundColor: color }]
+      : [styles.quickActionCardBase, styles.quickActionCardSmall, { backgroundColor: color }];
+
+    return (
+      <Pressable
+        style={cardStyle}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        onPress={onPress}
+      >
+        <View style={styles.cardContent}>
+          <Text style={styles.cardIcon}>{icon}</Text>
+          <View style={styles.cardTextContainer}>
+            <Text style={styles.cardTitle}>{title}</Text>
+            {subtitle && <Text style={styles.cardSubtitle}>{subtitle}</Text>}
+          </View>
+        </View>
+        <View style={styles.cardArrow}>
+          <Text style={styles.arrowText}>›</Text>
+        </View>
+      </Pressable>
+    );
+  };
+
+  type StatsCardProps = {
+    value: string;
+    label: string;
+    trend?: string;
+    color: string;
+  };
+
+  const StatsCard = ({ value, label, trend, color }: StatsCardProps) => (
+    <View style={[styles.statsCard, { borderLeftColor: color }]}>
+      <Text style={styles.statsValue}>{value}</Text>
+      <Text style={styles.statsLabel}>{label}</Text>
+      {trend && <Text style={[styles.statsTrend, { color }]}>{trend}</Text>}
+    </View>
+  );
+
+  if (loading) {
+    return (
+      <LinearGradient colors={['#f8fafc', '#ffffff', '#f1f5f9']} style={[styles.container, styles.webCenterWrap, isWeb && styles.webContainer]}>
+        <View style={[styles.loadingContainer, isWeb && styles.webInner]}>
+          <Text style={styles.loadingText}>กำลังโหลด...</Text>
+        </View>
+      </LinearGradient>
+    );
+  }
+
+  const bmi = calculateBMI(userProfile?.weight_kg ?? undefined, userProfile?.height_cm ?? undefined);
+  const dailyCalories = userProfile ? calculateDailyCalories(userProfile) : 2000;
+
+  return (
+    <>
+      {/* บนเว็บไม่ต้องใช้ StatusBar */}
+      {Platform.OS !== 'web' && <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />}
+
+      <SafeAreaView style={[styles.container, styles.webCenterWrap, isWeb && styles.webContainer]}>
+        <LinearGradient colors={['#f8fafc', '#ffffff', '#f1f5f9']} style={[styles.container, styles.webInner, isWide ? styles.desktopPadding : undefined]}>
+          <ScrollView
+            contentContainerStyle={[styles.scrollContent, isWeb && { paddingBottom: 40 }]}
+            showsVerticalScrollIndicator={isWeb}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          >
+            {/* Header */}
+            <Animated.View style={[styles.header, isWeb && styles.headerWeb, { opacity: fadeAnim }]}>
+              <View style={styles.headerTop}>
+                <View>
+                  <Text style={[styles.greeting, isWeb && styles.greetingWeb]}>สวัสดี, {getDisplayName()}</Text>
+                  <Text style={[styles.date, isWeb && styles.dateWeb]}>{todayString}</Text>
+                  <View style={styles.roleWrap}>
+                    <Text style={[styles.roleBadge, roleStyle]}>{roleLabel}</Text>
+                  </View>
+                </View>
+                <Pressable
+                  style={styles.profileButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="โปรไฟล์"
+                  onPress={() => router.push('/(tabs)/Profile')}
+                >
+                  <Text style={styles.profileIcon}>👤</Text>
+                </Pressable>
+              </View>
+
+              <View style={[styles.titleSection, isWeb && { alignItems: 'flex-start' }]}>
+                <Text style={[styles.mainTitle, isWeb && styles.mainTitleWeb]}>FitMe Dashboard</Text>
+              <Text style={styles.subtitle}>🎯 เป้าหมาย: {userProfile?.goal ? getGoalInThai(userProfile.goal) : 'ยังไม่ตั้งค่า'}</Text>
+                <View style={styles.chipsRow}>
+                  <Text style={styles.chip}>BMI: {bmi ?? '-'}</Text>
+                  <Text style={styles.chip}>แคลอรี่: {dailyCalories}</Text>
+                  <Text style={styles.chip}>น้ำ: {userProfile?.water_goal_l ?? 2} L</Text>
+                </View>
+              </View>
+            </Animated.View>
+
+            {/* Today Quick Start */}
+            <View style={[styles.todaySection, isWeb && { paddingHorizontal: 0 }]}>
+              {todayPlan ? (
+                <Pressable
+                  onPress={()=>router.push({ pathname:'/(tabs)/StartWorkout', params:{ planId: String(todayPlan.planId), dayId: String(todayPlan.dayId) }})}
+                  accessibilityRole="button"
+                  accessibilityLabel="เริ่มคอร์สวันนี้"
+                  style={({ pressed }) => [{ opacity: pressed ? 0.96 : 1 }]}
+                >
+                  <LinearGradient colors={["#131314ff","#8b5cf6"]} start={{x:0,y:0}} end={{x:1,y:1}} style={[styles.todayCardGrad, isWeb && styles.cardShadowWeb]}>
+                    <View style={{flex:1}}>
+                      <Text style={styles.todayTitle}>คอร์สวันนี้</Text>
+                      <Text style={styles.todaySub}>{todayPlan.title ?? 'แผนการออกกำลังกาย'} • {todayPlan.focus ?? 'Full-Body'}</Text>
+                    </View>
+                    <View style={styles.todayBtn}><Text style={styles.todayBtnText}>เริ่มวันนี้ ›</Text></View>
+                  </LinearGradient>
+                </Pressable>
+              ) : (
+                <View style={[styles.todayEmpty, isWeb && styles.cardShadowWeb]}>
+                  <Text style={styles.todayEmptyText}>ยังไม่มีแพลน • เริ่ม Onboarding เพื่อสร้างแพลน</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="เริ่ม Onboarding"
+                    onPress={()=>router.push('/(tabs)/WorkoutPlanDetail')}
+                    style={({ pressed }) => [styles.todayCreate, { opacity: pressed ? 0.9 : 1 }]}
+                  >
+                    <Text style={styles.todayCreateText}>เริ่ม Onboarding</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+
+            {/* Quick Stats */}
+            <Animated.View style={[styles.statsSection, { opacity: fadeAnim }]}>
+              <Text style={[styles.sectionTitle, isWeb && { paddingHorizontal: 0 }]}>ข้อมูลสุขภาพของคุณ</Text>
+              <View style={[styles.statsGrid, isWeb && styles.statsGridWeb]}>
+                <StatsCard value={userProfile?.weight_kg ? `${userProfile.weight_kg} กก.` : '-'} label="น้ำหนัก" color="#3b82f6" />
+                <StatsCard
+                  value={bmi ? `${bmi}` : '-'}
+                  label="BMI"
+                  trend={bmi ? (bmi < 18.5 ? 'ต่ำ' : bmi > 24.9 ? 'สูง' : 'ปกติ') : undefined}
+                  color={bmi ? (bmi < 18.5 || bmi > 24.9 ? '#ef4444' : '#10b981') : '#6b7280'}
+                />
+                <StatsCard value={`${dailyCalories}`} label="แคลอรี่/วัน" color="#f59e0b" />
+              </View>
+
+              <View style={[styles.statsGrid, { marginTop: 12 }, isWeb && styles.statsGridWeb]}>
+                <StatsCard value={userProfile?.height_cm ? `${userProfile.height_cm} ซม.` : '-'} label="ส่วนสูง" color="#8b5cf6" />
+                <StatsCard value={userProfile?.water_goal_l ? `${userProfile.water_goal_l} ลิตร` : '2.0 ลิตร'} label="เป้าหมายน้ำ" color="#06b6d4" />
+                <StatsCard
+                  value={
+                    userProfile?.activity_level
+                      ? String(userProfile.activity_level).replace(/_/g, ' ')
+                      : 'ปานกลาง'
+                  }
+                  label="ระดับกิจกรรม"
+                  color="#10b981"
+                />
+              </View>
+            </Animated.View>
+
+            {/* Quick Actions */}
+            <Animated.View style={[styles.quickActions, { opacity: fadeAnim }]}>
+              <Text style={[styles.sectionTitle, isWeb && { paddingHorizontal: 0 }]}>เมนูหลัก</Text>
+
+              {/* Large Feature Card */}
+              <QuickActionCard
+                title="AI แนะนำอาหาร"
+                subtitle="รับคำแนะนำจาก AI ส่วนตัว"
+                icon="🤖"
+                color="#6366f1"
+                isLarge
+                onPress={() => router.push('/(tabs)/AIRecommendationScreen')}
+              />
+
+              {/* Grid of smaller cards */}
+              <View style={[styles.actionGrid, isWeb && styles.actionGridWeb]}>
+                <QuickActionCard
+                  title="คำนวณแคลอรี่"
+                  icon="🔥"
+                  color="#ef4444"
+                  onPress={() => router.push('/(tabs)/CalorieTrackerScreen')}
+                />
+
+                <QuickActionCard
+                  title="แพลนออกกำลัง"
+                  icon="💪"
+                  color="#10b981"
+                  onPress={() => router.push('/(tabs)/WorkoutProgram')}
+                />
+
+                <QuickActionCard
+                  title="ปรับโปรไฟล์" icon="⚙️"
+                  color="#f59e0b"
+                  onPress={() => router.push('/(tabs)/EditProfile')}
+                />
+                <QuickActionCard
+                  title="ดื่มน้ำ"
+                  icon="💧"
+                  color="#06b6d4"
+                  onPress={() => router.push('/(tabs)/WaterTracker')}
+                />
+                <QuickActionCard
+                  title="สถิติสุขภาพ" icon="📊"
+                  color="#8b5cf6"
+                  onPress={() => router.push('/(tabs)/StatsScreen')}
+                />
+              </View>
+            </Animated.View>
+
+            {/* Health Condition Alert */}
+            {userProfile?.health_condition ? (
+              <Animated.View style={[styles.healthAlert, { opacity: fadeAnim }]}>
+                <View style={[styles.alertCard, isWeb && styles.cardShadowWeb]}>
+                  <View style={styles.alertHeader}>
+                    <Text style={styles.alertIcon}>⚠️</Text>
+                    <Text style={styles.alertTitle}>ข้อมูลสุขภาพ</Text>
+                  </View>

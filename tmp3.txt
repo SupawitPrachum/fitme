@@ -1,0 +1,237 @@
+                  <Text style={styles.alertText}>{userProfile.health_condition}</Text>
+                  <Text style={styles.alertSubtext}>กรุณาปรึกษาแพทย์ก่อนเริ่มแผนการออกกำลังกายใหม่</Text>
+                </View>
+              </Animated.View>
+            ) : null}
+
+            {/* Progress Section */}
+            <Animated.View style={[styles.progressSection, { opacity: fadeAnim }]}>
+              <Text style={[styles.sectionTitle, isWeb && { paddingHorizontal: 0 }]}>ความคืบหน้า</Text>
+              <View style={[styles.progressCard, isWeb && styles.cardShadowWeb]}>
+                <View style={styles.progressHeader}>
+                  <Text style={styles.progressTitle}>เป้าหมายสัปดาห์นี้</Text>
+                  <Text style={styles.progressPercent}>75%</Text>
+                </View>
+                <View style={styles.progressBarContainer}>
+                  <View style={styles.progressBar}>
+                    <Animated.View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: fadeAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['0%', '75%'],
+                          }),
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+                <Text style={styles.progressText}>คุณใกล้จะถึงเป้าหมายแล้ว! 🎯</Text>
+              </View>
+            </Animated.View>
+
+            {/* Tips Card */}
+            <Animated.View style={[styles.tipsSection, { opacity: fadeAnim }]}>
+              <View style={[styles.tipCard, isWeb && styles.cardShadowWeb]}>
+                <View style={styles.tipHeader}>
+                  <Text style={styles.tipIcon}>💡</Text>
+                  <Text style={styles.tipTitle}>เคล็ดลับวันนี้</Text>
+                </View>
+                <Text style={styles.tipText}>
+                  {userProfile?.water_goal_l
+                    ? `ดื่มน้ำ ${userProfile.water_goal_l} ลิตรต่อวัน เพื่อช่วยให้ระบบเผาผลาญทำงานได้ดียิ่งขึ้น`
+                    : 'ดื่มน้ำ 8-10 แก้วต่อวัน เพื่อช่วยให้ระบบเผาผลาญทำงานได้ดียิ่งขึ้น'}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="อ่านเคล็ดลับเพิ่มเติม"
+                  style={({ pressed }) => [styles.tipButton, { opacity: pressed ? 0.9 : 1 }]}
+                  onPress={() => navigation.navigate('HealthTips')}
+                >
+                  <Text style={styles.tipButtonText}>อ่านเคล็ดลับเพิ่มเติม</Text>
+                </Pressable>
+              </View>
+            </Animated.View>
+          </ScrollView>
+        </LinearGradient>
+      </SafeAreaView>
+    </>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  webCenterWrap: {
+    alignItems: 'center',
+  },
+  webContainer: {
+    backgroundColor: '#f8fafc',
+  },
+  webInner: {
+    width: '100%',
+    maxWidth: 820, // กึ่งกลางบนเว็บ (มือถือยังเต็มจอ)
+    alignSelf: 'center',
+  },
+  desktopPadding: {
+    paddingHorizontal: 24,
+  },
+
+  scrollContent: { paddingBottom: 30 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { fontSize: 16, color: '#6b7280' },
+
+  // Header Styles
+  header: { paddingHorizontal: 24, paddingTop: Platform.OS === 'ios' ? 16 : 8, paddingBottom: 20 },
+  headerWeb: { paddingTop: 24 }, // เพิ่มระยะบนเว็บให้โปร่ง
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
+  greeting: { fontSize: 24, fontWeight: '700', color: '#1f2937' },
+  greetingWeb: { fontSize: 26 },
+  date: { fontSize: 14, color: '#6b7280', marginTop: 4 },
+  dateWeb: { fontSize: 15 },
+  profileButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
+  profileIcon: { fontSize: 22 },
+  titleSection: { alignItems: 'center' },
+  mainTitle: { fontSize: 28, fontWeight: '800', color: '#111827', marginBottom: 4 },
+  mainTitleWeb: { fontSize: 30 },
+
+  // Role badge
+  roleWrap: { marginTop: 8 },
+  roleBadge: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  adminBadge: { backgroundColor: '#ede9fe', color: '#6d28d9', borderWidth: 1, borderColor: '#c4b5fd' },
+  userBadge: { backgroundColor: '#f3f4f6', color: '#374151', borderWidth: 1, borderColor: '#e5e7eb' },
+
+  // Section Titles
+  sectionTitle: { fontSize: 20, fontWeight: '700', color: '#1f2937', marginBottom: 16, paddingHorizontal: 24 },
+
+  // Stats Section
+  statsSection: { marginBottom: 32 },
+  statsGrid: { flexDirection: 'row', paddingHorizontal: 24, justifyContent: 'space-between' },
+  statsGridWeb: {
+    gap: 12,
+    paddingHorizontal: 0,
+  },
+  statsCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    flex: 1,
+    marginHorizontal: 4,
+    borderLeftWidth: 4,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 },
+      android: { elevation: 3 },
+      web: { shadowColor: 'rgba(0,0,0,0.1)', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8 },
+    }),
+  },
+  statsValue: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 4 },
+  statsLabel: { fontSize: 12, color: '#6b7280', marginBottom: 4 },
+  statsTrend: { fontSize: 12, fontWeight: '600' },
+
+  // Health Alert
+  healthAlert: { marginBottom: 32 },
+  alertCard: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 16,
+    padding: 20,
+    marginHorizontal: 24,
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+  },
+  alertHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  alertIcon: { fontSize: 20, marginRight: 8 },
+  alertTitle: { fontSize: 16, fontWeight: '700', color: '#92400e' },
+  alertText: { fontSize: 14, color: '#92400e', marginBottom: 4 },
+  alertSubtext: { fontSize: 12, color: '#a16207', fontStyle: 'italic' },
+
+  // Quick Actions
+  quickActions: { marginBottom: 32 },
+  quickActionCardBase: {
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
+      android: { elevation: 6 },
+      web: { shadowColor: 'rgba(0,0,0,0.15)', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 1, shadowRadius: 12 },
+    }),
+  },
+  quickActionCardLarge: { marginHorizontal: 24 },
+  quickActionCardSmall: { width: '48%', marginHorizontal: 0 },
+  largeCard: { paddingVertical: 24 },
+  cardContent: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  cardIcon: { fontSize: 32, marginRight: 16, lineHeight: 32 },
+  cardTextContainer: { flex: 1 },
+  cardTitle: { fontSize: 18, fontWeight: '700', color: '#ffffff', marginBottom: 4 },
+  cardSubtitle: { fontSize: 14, color: 'rgba(255, 255, 255, 0.85)' },
+  cardArrow: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255, 255, 255, 0.2)', alignItems: 'center', justifyContent: 'center' },
+  arrowText: { fontSize: 18, fontWeight: 'bold', color: '#ffffff' },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 24, justifyContent: 'space-between' },
+  actionGridWeb: { paddingHorizontal: 0, gap: 12 },
+
+  // Progress Section
+  progressSection: { marginBottom: 32 },
+  progressCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    marginHorizontal: 24,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8 },
+      android: { elevation: 3 },
+      web: { shadowColor: 'rgba(0,0,0,0.1)', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8 },
+    }),
+  },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  progressTitle: { fontSize: 18, fontWeight: '700', color: '#1f2937' },
+  progressPercent: { fontSize: 24, fontWeight: '800', color: '#3b82f6' },
+  progressBarContainer: { marginBottom: 12 },
+  progressBar: { height: 8, backgroundColor: '#e5e7eb', borderRadius: 4, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#3b82f6', borderRadius: 4 },
+  progressText: { fontSize: 14, color: '#6b7280' },
+
+  // Tips Section
+  tipsSection: { marginBottom: 20 },
+  tipCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 24, marginHorizontal: 24, borderWidth: 1, borderColor: '#e5e7eb' },
+  tipHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  tipIcon: { fontSize: 24, marginRight: 8, lineHeight: 24 },
+  tipTitle: { fontSize: 18, fontWeight: '700', color: '#1f2937' },
+  tipText: { fontSize: 14, color: '#6b7280', lineHeight: 20, marginBottom: 16 },
+  tipButton: { backgroundColor: '#f3f4f6', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, alignSelf: 'flex-start' },
+  tipButtonText: { fontSize: 14, fontWeight: '600', color: '#374151' },
+
+  // Today quick styles
+  todaySection:{ paddingHorizontal:24, marginBottom:16 },
+  todayCardGrad:{ borderRadius:16, padding:16, flexDirection:'row', alignItems:'center' },
+  todayTitle:{ color:'#93c5fd', fontWeight:'800', marginBottom:4 },
+  todaySub:{ color:'#e5e7eb' },
+  todayBtn:{ backgroundColor:'#2563eb', paddingVertical:8, paddingHorizontal:12, borderRadius:10 },
+  todayBtnText:{ color:'#fff', fontWeight:'800' },
+  todayEmpty:{ backgroundColor:'#ffffff', borderColor:'#e5e7eb', borderWidth:1, borderRadius:16, padding:16, alignItems:'flex-start' },
+  todayEmptyText:{ color:'#374151', marginBottom:8 },
+  todayCreate:{ backgroundColor:'#8b5cf6', borderRadius:10, paddingVertical:8, paddingHorizontal:12 },
+  todayCreateText:{ color:'#fff', fontWeight:'800' },
+
+  // Header chips
+  chipsRow:{ flexDirection:'row', flexWrap:'wrap', gap:8, marginTop:8 },
+  chip:{ paddingVertical:6, paddingHorizontal:10, borderRadius:999, backgroundColor:'#eef2ff', color:'#3730a3', fontWeight:'800', borderWidth:1, borderColor:'#c7d2fe' },
+
+  // Web-specific shadow helper (เพิ่มนิดให้เด้งบนเว็บ)
+  cardShadowWeb: {
+    shadowColor: 'rgba(0,0,0,0.1)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+  },
+});
+
+export default HomeScreen;

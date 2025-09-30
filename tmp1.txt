@@ -1,0 +1,250 @@
+// app/(tabs)/HomeScreen.tsx
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import {
+  Animated,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+  RefreshControl,
+  Alert,
+  Pressable,
+  useWindowDimensions,
+  SafeAreaView,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
+import { API_BASE_URL } from '@/constants/api';
+import { getToken } from '@/hooks/use-auth';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
+const AUTH_KEY = 'auth_token';
+const PLAN_CACHE_KEY = 'last_workout_plan_v1';
+const LAST_DONE_KEY = 'last_workout_done_v1';
+
+/** ========= Cross-platform Storage (web fallback) ========= **/
+const storage = {
+  getItem: async (key: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key);
+    }
+    return AsyncStorage.getItem(key);
+  },
+  setItem: async (key: string, val: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, val);
+      return;
+    }
+    return AsyncStorage.setItem(key, val);
+  },
+  removeItem: async (key: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    return AsyncStorage.removeItem(key);
+  },
+};
+
+// Types for API responses
+interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  gender: 'male' | 'female' | string;
+  date_of_birth: string;
+  is_admin?: boolean;
+  is_active?: boolean;
+  photo_url?: string | null;
+
+  exercise_type?: string | null;
+  activity_level?: string | null;
+  weight_kg?: number | null;
+  height_cm?: number | null;
+  water_goal_l?: number | null;
+  health_condition?: string | null;
+  goal?: string | null;
+}
+
+type HomeScreenProps = {
+  navigation: NativeStackNavigationProp<any>;
+};
+
+const HomeScreen = ({ navigation }: HomeScreenProps) => {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [todayPlan, setTodayPlan] = useState<{ planId:number; dayId:number; title?:string; focus?:string } | null>(null);
+  const { width } = useWindowDimensions();
+  const isWeb = Platform.OS === 'web';
+  const isWide = isWeb && width >= 900;      // จอ desktop
+  const isTablet = !isWeb && width >= 768;   // แท็บเล็ต
+
+  // ---- helpers ----
+  const showAlert = (title: string, message: string) => {
+    if (isWeb && typeof window !== 'undefined') {
+      window.alert(`${title}\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
+  const fetchUserProfile = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) {
+        router.replace('/(tabs)/login');
+        return;
+      }
+      const res = await fetch(`${API_BASE_URL}/api/me`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (res.status === 401) {
+        await storage.removeItem(AUTH_KEY);
+        router.replace('/(tabs)/login');
+        return;
+      }
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+
+      const data: UserProfile | null = await res.json();
+      setUserProfile(data);
+    } catch (error: any) {
+      console.error('Error fetching user profile:', error);
+      showAlert('ข้อผิดพลาด', error?.message ?? 'เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
+    } finally {
+      setLoading(false);
+    }
+  }, [isWeb]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchUserProfile();
+    setRefreshing(false);
+  }, [fetchUserProfile]);
+
+  // โหลดครั้งแรก
+  useEffect(() => {
+    fetchUserProfile();
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 800,
+      useNativeDriver: true, // opacity รองรับบน web
+    }).start();
+    (async () => {
+      try {
+        const raw = await storage.getItem(PLAN_CACHE_KEY);
+        if (!raw) { setTodayPlan(null); return; }
+        const plan = JSON.parse(raw);
+        const days = Array.isArray(plan?.days) ? plan.days : [];
+        if (!plan?.id || days.length === 0) { setTodayPlan(null); return; }
+
+        let nextDay = days[0];
+        try {
+          const lastRaw = await storage.getItem(LAST_DONE_KEY);
+          if (lastRaw) {
+            const last = JSON.parse(lastRaw);
+            if (last?.planId === plan.id) {
+              const idx = days.findIndex((d:any)=> d?.id === last.dayId);
+              if (idx >= 0) nextDay = days[(idx + 1) % days.length];
+            }
+          }
+        } catch {}
+
+        setTodayPlan({ planId:Number(plan.id), dayId:Number(nextDay.id), title:plan.title, focus:nextDay.focus });
+      } catch { setTodayPlan(null); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // โหลดใหม่ทุกครั้งที่กลับเข้าหน้า
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        const token = await getToken();
+        if (!token) {
+          router.replace('/(tabs)/login');
+          return;
+        }
+        setLoading(true);
+        await fetchUserProfile();
+      })();
+    }, [fetchUserProfile])
+  );
+
+  // Calculate BMI if height and weight are available
+  const calculateBMI = (weight?: number | null, height?: number | null): number | null => {
+    if (!weight || !height) return null;
+    const heightInMeters = height / 100;
+    return parseFloat((weight / (heightInMeters * heightInMeters)).toFixed(1));
+  };
+
+  // Normalize activity level strings between app/server
+  const normalizeActivityKey = (raw?: string | null) => {
+    if (!raw) return 'moderate_activity';
+    const s = String(raw).toLowerCase();
+    if (s.includes('sedentary')) return 'sedentary';
+    if (s.includes('light')) return 'light_activity';
+    if (s.includes('moderate')) return 'moderate_activity';
+    if (s.includes('intense') || s.includes('active')) {
+      if (s.includes('very')) return 'very_intense';
+      return 'intense_activity';
+    }
+    return raw;
+  };
+
+  // Calculate daily calorie goal based on profile
+  const calculateDailyCalories = (profile: UserProfile): number => {
+    const w = profile.weight_kg ?? undefined;
+    const h = profile.height_cm ?? undefined;
+    if (!w || !h || !profile.date_of_birth) return 2000;
+
+    const birth = new Date(profile.date_of_birth);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+
+    // ใช้ Mifflin–St Jeor (แม่นกว่า Harris-Benedict)
+    let bmr = 0;
+    if (String(profile.gender).toLowerCase() === 'male') {
+      bmr = 10*w + 6.25*h - 5*age + 5;
+    } else {
+      bmr = 10*w + 6.25*h - 5*age - 161;
+    }
+
+    const mult: Record<string, number> = {
+      sedentary: 1.2,
+      light_activity: 1.375,
+      moderate_activity: 1.55,
+      intense_activity: 1.725,
+      very_intense: 1.9,
+    };
+    const key = normalizeActivityKey(profile.activity_level);
+    const multiplier = mult[key] ?? 1.55;
+    return Math.round(bmr * multiplier);
+  };
+
+  // Display name & date
+  const getDisplayName = (): string => {
+    if (!userProfile) return 'ผู้ใช้';
+    return `${userProfile.first_name ?? ''} ${userProfile.last_name ?? ''}`.trim() || userProfile.username;
+  };
+
+  const todayString = useMemo(() => {
+    try {
+      return new Date().toLocaleDateString('th-TH', {
+        weekday: 'long',

@@ -2232,6 +2232,195 @@ app.post('/api/ai/workout-suggest', requireAuth, async (req, res) => {
   }
 });
 
+// Create a structured workout plan using AI and persist to DB
+// Request: same prefs as /api/workout/plan
+// Response: same shape as /api/workout/plan (includes ids)
+app.post('/api/ai/workout-plan', requireAuth, async (req, res) => {
+  const prefs = req.body || {};
+  try {
+    validatePrefs(prefs);
+
+    // Helper: safe string with max length
+    const safeStr = (v, max) => {
+      const s = (v == null) ? '' : String(v);
+      return s.length > max ? s.slice(0, max) : s;
+    };
+
+    // Build prompt requiring strict JSON
+    const constraints = [
+      `วัน/สัปดาห์: ${prefs.daysPerWeek}`,
+      `เวลา/ครั้ง: ${prefs.minutesPerSession} นาที`,
+      `อุปกรณ์: ${prefs.equipment}`,
+      `เลเวล: ${prefs.level}`,
+      `เป้าหมาย: ${prefs.goal}`,
+      prefs.addCardio ? 'เพิ่มคาร์ดิโอ' : '',
+      prefs.addCore ? 'เพิ่ม Core' : '',
+      prefs.addMobility ? 'เพิ่ม Mobility' : '',
+    ].filter(Boolean).join('\n• ');
+
+    const profile = `เพศ ${req.user.gender || '-'} • เกิด ${req.user.date_of_birth || '-'}`;
+    const sys = 'คุณคือโค้ชออกกำลังกายที่ให้คำแนะนำปลอดภัยและยั่งยืน ใช้ภาษาไทย';
+    const user = `โปรไฟล์ผู้ใช้: ${profile}\nข้อกำหนด:\n• ${constraints}\n\nงาน: สร้างแผนฝึกรายสัปดาห์แบบ JSON เท่านั้น ไม่ใส่คำอธิบายอื่นนอกจาก JSON โดยมีโครงสร้างดังนี้:\n{\n  "title": "string ไทยสั้นกระชับ",\n  "progression": ["string"...],\n  "deloadAdvice": "string",\n  "days": [\n    {\n      "dayOrder": 1,\n      "focus": "Full-Body|Upper|Lower|Push|Pull|Legs|Conditioning",\n      "warmup": "string",\n      "cooldown": "string",\n      "exercises": [\n        {"name": "string", "sets": 3, "repsOrTime": "8–12", "restSec": 60, "notes": "RIR 1–2"}\n      ]\n    }\n  ]\n}\nเงื่อนไข: สร้างตามจำนวนวัน ${prefs.daysPerWeek} วัน และเวลาต่อครั้ง ${prefs.minutesPerSession} นาที โดยประมาณ`;
+
+    let aiPlan = null;
+    try {
+      const data = await callOpenAICompatible([
+        { role: 'system', content: sys },
+        { role: 'user', content: user },
+      ], 0.6);
+      let text = String(data?.choices?.[0]?.message?.content || '').trim();
+      // Try to extract JSON from code fences if present
+      const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fence) text = fence[1].trim();
+      try {
+        aiPlan = JSON.parse(text);
+      } catch (_) {
+        // Try to find first {...}
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) aiPlan = JSON.parse(m[0]);
+      }
+    } catch (e) {
+      if (AI_DEBUG) console.warn('[ai-workout-plan] parse or call error:', e?.message || e);
+    }
+
+    // Fallback to deterministic structure if AI failed
+    let days;
+    let title = deriveTitleFromPrefs(prefs);
+    let progression = [];
+    let deloadAdvice = null;
+
+    if (aiPlan && Array.isArray(aiPlan.days) && aiPlan.days.length) {
+      // Normalize AI days
+      const normDays = [];
+      for (let i = 0; i < aiPlan.days.length; i++) {
+        const d = aiPlan.days[i] || {};
+        const order = Number(d.dayOrder || (d.day && String(d.day).match(/(\d+)/)?.[1]) || (i + 1));
+        const focus = safeStr(d.focus || 'Full-Body', 64);
+        const warmup = safeStr(d.warmup || '5–8m warm-up + dynamic mobility', 255);
+        const cooldown = safeStr(d.cooldown || '3–5m cooldown & stretching', 255);
+        const exIn = Array.isArray(d.exercises) ? d.exercises : [];
+        const exs = [];
+        let seq = 1;
+        for (const ex of exIn) {
+          const name = safeStr(ex?.name || '', 100);
+          if (!name) continue;
+          const sets = (ex?.sets != null && Number.isFinite(Number(ex.sets))) ? Number(ex.sets) : null;
+          const rt = ex?.repsOrTime != null ? String(ex.repsOrTime) : (ex?.reps != null ? String(ex.reps) : (ex?.timeSec != null ? `${Number(ex.timeSec)}s` : null));
+          const repsOrTime = rt ? safeStr(rt, 32) : null;
+          const restSec = (ex?.restSec != null && Number.isFinite(Number(ex.restSec))) ? Number(ex.restSec) : (ex?.rest != null && Number.isFinite(Number(ex.rest)) ? Number(ex.rest) : null);
+          const notes = ex?.notes != null ? safeStr(ex.notes, 255) : null;
+          exs.push({ seq: seq++, name, sets, repsOrTime, restSec, notes });
+        }
+        normDays.push({ dayOrder: order, focus, warmup, cooldown, exercises: exs });
+      }
+      // Ensure correct number of days
+      days = normDays.slice(0, Number(prefs.daysPerWeek));
+      if (days.length < Number(prefs.daysPerWeek)) {
+        const fill = buildPlanStructure(prefs);
+        while (days.length < Number(prefs.daysPerWeek) && fill[days.length]) {
+          const d = fill[days.length];
+          const exs = buildExercisesForDay(d.focus, prefs).map((e, idx) => ({
+            seq: idx + 1,
+            name: e.ExerciseName,
+            sets: e.Sets ?? null,
+            repsOrTime: e.RepsOrTime ?? null,
+            restSec: e.RestSec ?? null,
+            notes: e.Notes ?? null,
+          }));
+          days.push({ dayOrder: d.dayOrder, focus: d.focus, warmup: d.warmup, cooldown: d.cooldown, exercises: exs });
+        }
+      }
+      if (aiPlan.title) title = safeStr(aiPlan.title, 120);
+      if (Array.isArray(aiPlan.progression)) progression = aiPlan.progression.map(x => safeStr(x, 255));
+      if (aiPlan.deloadAdvice) deloadAdvice = safeStr(aiPlan.deloadAdvice, 255);
+    } else {
+      // Deterministic fallback
+      const baseDays = buildPlanStructure(prefs);
+      days = baseDays.map(d => {
+        const exs = buildExercisesForDay(d.focus, prefs).map((e, idx) => ({
+          seq: idx + 1,
+          name: e.ExerciseName,
+          sets: e.Sets ?? null,
+          repsOrTime: e.RepsOrTime ?? null,
+          restSec: e.RestSec ?? null,
+          notes: e.Notes ?? null,
+        }));
+        return { dayOrder: d.dayOrder, focus: d.focus, warmup: d.warmup, cooldown: d.cooldown, exercises: exs };
+      });
+    }
+
+    // Persist plan into DB (similar to /api/workout/plan)
+    const pool = await poolPromise;
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const planReq = new sql.Request(tx);
+      planReq
+        .input('UserId', sql.Int, req.user.id)
+        .input('Title', sql.NVarChar(120), title)
+        .input('Goal', sql.NVarChar(32), prefs.goal)
+        .input('DaysPerWeek', sql.TinyInt, prefs.daysPerWeek)
+        .input('MinutesPerSession', sql.SmallInt, prefs.minutesPerSession)
+        .input('Equipment', sql.NVarChar(16), prefs.equipment)
+        .input('Level', sql.NVarChar(16), prefs.level)
+        .input('AddCardio', sql.Bit, prefs.addCardio ? 1 : 0)
+        .input('AddCore', sql.Bit, prefs.addCore ? 1 : 0)
+        .input('AddMobility', sql.Bit, prefs.addMobility ? 1 : 0);
+
+      const planIns = await planReq.query(`
+        INSERT INTO dbo.Workout_Plans
+        (UserId, Title, Goal, DaysPerWeek, MinutesPerSession, Equipment, Level, AddCardio, AddCore, AddMobility)
+        OUTPUT inserted.Id, inserted.CreatedAt
+        VALUES (@UserId, @Title, @Goal, @DaysPerWeek, @MinutesPerSession, @Equipment, @Level, @AddCardio, @AddCore, @AddMobility)
+      `);
+      const planId = planIns.recordset[0].Id;
+
+      for (const d of days) {
+        const dayReq = new sql.Request(tx);
+        dayReq
+          .input('PlanId', sql.Int, planId)
+          .input('DayOrder', sql.TinyInt, d.dayOrder)
+          .input('Focus', sql.NVarChar(64), d.focus)
+          .input('Warmup', sql.NVarChar(255), d.warmup ?? null)
+          .input('Cooldown', sql.NVarChar(255), d.cooldown ?? null);
+        const dayIns = await dayReq.query(`
+          INSERT INTO dbo.Workout_Plan_Days (PlanId, DayOrder, Focus, Warmup, Cooldown)
+          OUTPUT inserted.Id
+          VALUES (@PlanId, @DayOrder, @Focus, @Warmup, @Cooldown)
+        `);
+        const dayId = dayIns.recordset[0].Id;
+
+        let seq = 1;
+        for (const ex of (d.exercises || [])) {
+          const exReq = new sql.Request(tx);
+          exReq
+            .input('DayId', sql.Int, dayId)
+            .input('Seq', sql.TinyInt, Number(ex.seq || seq++))
+            .input('ExerciseName', sql.NVarChar(100), safeStr(ex.name || '', 100))
+            .input('Sets', sql.SmallInt, ex.sets != null ? Number(ex.sets) : null)
+            .input('RepsOrTime', sql.NVarChar(32), ex.repsOrTime ? safeStr(ex.repsOrTime, 32) : null)
+            .input('RestSec', sql.SmallInt, ex.restSec != null ? Number(ex.restSec) : null)
+            .input('Notes', sql.NVarChar(255), ex.notes ? safeStr(ex.notes, 255) : null);
+          await exReq.query(`
+            INSERT INTO dbo.Workout_Plan_Exercises (DayId, Seq, ExerciseName, Sets, RepsOrTime, RestSec, Notes)
+            VALUES (@DayId, @Seq, @ExerciseName, @Sets, @RepsOrTime, @RestSec, @Notes)
+          `);
+        }
+      }
+
+      await tx.commit();
+      const plan = await fetchPlanById(planId, req.user.id);
+      return res.json(plan);
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  } catch (err) {
+    console.error('POST /api/ai/workout-plan error', err?.message || err);
+    res.status(400).json({ error: err.message || 'bad request' });
+  }
+});
+
 // Quick provider health: list available models and methods
 app.get('/api/ai/models', async (_req, res) => {
   try {

@@ -173,7 +173,8 @@ export default function WorkoutProgram() {
         return;
       }
 
-      const res = await fetch(`${API_URL}/api/workout/plan`, {
+      // Use AI endpoint by default; fallback to deterministic if needed
+      let res = await fetch(`${API_URL}/api/ai/workout-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(prefs),
@@ -186,8 +187,16 @@ export default function WorkoutProgram() {
         return;
       }
       if (!res.ok) {
-        const txt = await res.text().catch(()=> '');
-        throw new Error(txt || `HTTP ${res.status}`);
+        // fallback to classic endpoint
+        res = await fetch(`${API_URL}/api/workout/plan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(prefs),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(()=> '');
+          throw new Error(txt || `HTTP ${res.status}`);
+        }
       }
       const plan = await res.json();
       await AsyncStorage.setItem(PLAN_CACHE_KEY, JSON.stringify(plan));

@@ -1,7 +1,7 @@
 // app/(tabs)/WorkoutProgram.tsx
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, Switch
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, Alert, Switch, Modal, ActivityIndicator
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -60,6 +60,9 @@ export default function WorkoutProgram() {
   const [loading, setLoading] = useState(false);
   const [hasCachedPlan, setHasCachedPlan] = useState(false);
   const [displayName, setDisplayName] = useState<string>('คุณ');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiText, setAiText] = useState<string | null>(null);
+  const [showAIPreview, setShowAIPreview] = useState(false);
 
   // โหลดค่าที่เคยเลือก + ชื่อผู้ใช้สำหรับทักทาย + เช็คว่ามีแผนเก่าไหม
   useEffect(() => {
@@ -196,6 +199,54 @@ export default function WorkoutProgram() {
     }
   };
 
+  const previewWithAI = async () => {
+    try {
+      setAiLoading(true);
+      setAiText(null);
+      setShowAIPreview(true);
+
+      const token = await AsyncStorage.getItem(AUTH_KEY);
+      if (!token) {
+        setShowAIPreview(false);
+        Alert.alert('ต้องล็อกอิน', 'กรุณาเข้าสู่ระบบก่อนใช้งาน AI');
+        router.replace('/(tabs)/login');
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/api/ai/workout-suggest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(prefs),
+      });
+
+      if (res.status === 401) {
+        await AsyncStorage.removeItem(AUTH_KEY);
+        setShowAIPreview(false);
+        Alert.alert('หมดเวลา', 'กรุณาล็อกอินใหม่');
+        router.replace('/(tabs)/login');
+        return;
+      }
+
+      const raw = await res.json().catch(() => ({}));
+      if (raw && typeof raw === 'object' && raw.ok === false) {
+        const msg = raw?.error?.reason ? `AI error: ${raw.error.reason}` : 'ไม่สามารถสร้างจาก AI ได้';
+        setAiText(msg);
+        return;
+      }
+      if (typeof raw?.text === 'string') {
+        setAiText(raw.text);
+      } else if (typeof raw === 'string') {
+        setAiText(raw);
+      } else {
+        setAiText('ไม่พบข้อความจาก AI');
+      }
+    } catch (e:any) {
+      setAiText(`โหมดออฟไลน์: ${e?.message ?? 'เกิดข้อผิดพลาดในการเชื่อมต่อ'}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const loadLastPlan = async () => {
     const raw = await AsyncStorage.getItem(PLAN_CACHE_KEY);
     if (!raw) return Alert.alert('ยังไม่มีแผนล่าสุด', 'กรุณาสร้างแพลนก่อน');
@@ -313,6 +364,14 @@ export default function WorkoutProgram() {
       </View>
 
       {/* Actions */}
+      <TouchableOpacity style={[styles.cta, aiLoading && {opacity:0.7}]} disabled={aiLoading} onPress={previewWithAI}>
+        {aiLoading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.ctaText}>ให้ AI ออกแบบและพรีวิว</Text>
+        )}
+      </TouchableOpacity>
+
       <TouchableOpacity style={[styles.cta, loading && {opacity:0.7}]} disabled={loading} onPress={createPlan}>
         <Text style={styles.ctaText}>{loading ? 'กำลังสร้างแพลน...' : 'สร้างแพลน'}</Text>
       </TouchableOpacity>
@@ -342,6 +401,56 @@ export default function WorkoutProgram() {
         <Text style={styles.tipText}>• จดน้ำหนัก/จำนวนครั้ง เพื่อทำ progressive overload ทุกสัปดาห์</Text>
         <Text style={styles.tipText}>• นอนให้พอ โปรตีน 1.6–2.2 g/kg หากเน้นกล้ามเนื้อ</Text>
       </View>
+
+      {/* AI Preview Modal */}
+      <Modal visible={showAIPreview} animationType="slide" presentationStyle="pageSheet">
+        <ScrollView contentContainerStyle={{ padding:16, paddingBottom:24, backgroundColor:'#fff' }}>
+          <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+            <Text style={[styles.title, { marginBottom:0 }]}>🤖 พรีวิวโดย AI</Text>
+            <TouchableOpacity style={styles.linkBtn} onPress={()=>setShowAIPreview(false)}>
+              <Text style={styles.linkText}>ปิด</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Summary badges */}
+          <View style={styles.previewCard}>
+            <Text style={styles.previewTitle}>สรุปพรีวิว</Text>
+            <Text style={styles.previewSub}>Split: <Text style={styles.bold}>{splitLabel}</Text></Text>
+            <Text style={styles.previewSub}>เวลารวม/สัปดาห์: <Text style={styles.bold}>{weeklyMinutes}</Text> นาที</Text>
+            <Text style={styles.previewSub}>ประมาณเผาผลาญ: <Text style={styles.bold}>{weeklyBurnKcal}</Text> kcal/สัปดาห์</Text>
+            <View style={styles.previewDays}>
+              {previewDays.map((d, i)=>(
+                <View key={i} style={styles.dayBox}>
+                  <Text style={styles.dayTitle}>{d.day}</Text>
+                  <Text style={styles.dayFocus}>{d.focus}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* AI Text */}
+          <View style={styles.card}>
+            <Text style={styles.section}>ข้อเสนอแนะจาก AI</Text>
+            {aiLoading ? (
+              <ActivityIndicator />
+            ) : (
+              <View>
+                {(aiText || '').split('\n').map((line, i) => (
+                  <Text key={i} style={{ color:'#374151', marginTop:2 }}>{line}</Text>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* Actions */}
+          <TouchableOpacity style={[styles.cta, (loading||aiLoading) && {opacity:0.7}]} disabled={loading||aiLoading} onPress={createPlan}>
+            <Text style={styles.ctaText}>{loading ? 'กำลังสร้างแพลน...' : 'ยืนยันและสร้างแพลน'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondary} onPress={()=>setShowAIPreview(false)}>
+            <Text style={styles.secondaryText}>ยกเลิก/แก้ไขพรีเซ็ต</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </Modal>
     </ScrollView>
   );
 }

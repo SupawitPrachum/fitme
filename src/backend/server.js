@@ -2165,6 +2165,73 @@ app.post('/api/ai/meal-suggest', requireAuth, async (req, res) => {
   }
 });
 
+// AI-assisted workout plan suggestions (text preview)
+app.post('/api/ai/workout-suggest', requireAuth, async (req, res) => {
+  try {
+    // If external model is disabled, return a helpful default preview text
+    if (!useExternalModel) {
+      if (AI_DEBUG) console.log('[/api/ai/workout-suggest] mock mode (EXTERNAL_MODEL=off)');
+      const text = `สรุปพรีวิวแผนฝึก (ตัวอย่าง):\n• Split: Full-Body x3 (45 นาที/ครั้ง)\n• เน้นเทคนิคพื้นฐาน + โมบิลิตี้ 5 นาที/วัน\n• วันตัวอย่าง: \n  - Day 1: Squat/Push/Pull + Plank \n  - Day 2: Hinge/Lunge/Row + Dead Bug \n  - Day 3: Push/Pull/Legs + Cardio 10 นาที\nข้อแนะนำ: รักษา RIR 1–3 เซ็ตท้าย ปรับเพิ่ม/ลดปริมาณตามความรู้สึก และนอนหลับให้เพียงพอ`;
+      return res.json({ ok: true, text });
+    }
+
+    const p = req.body || {};
+    const days = Number(p.daysPerWeek) || 3;
+    const mins = Number(p.minutesPerSession) || 45;
+    const equip = String(p.equipment || 'minimal');
+    const level = String(p.level || 'beginner');
+    const goal = String(p.goal || 'general_fitness');
+    const addCardio = Boolean(p.addCardio);
+    const addCore = Boolean(p.addCore);
+    const addMobility = Boolean(p.addMobility);
+
+    const constraints = [
+      `วันต่อสัปดาห์: ${days}`,
+      `เวลาต่อครั้ง: ${mins} นาที`,
+      `อุปกรณ์: ${equip}`,
+      `เลเวล: ${level}`,
+      `เป้าหมาย: ${goal}`,
+      addCardio ? 'เพิ่มคาร์ดิโอ' : '',
+      addCore ? 'เพิ่ม Core' : '',
+      addMobility ? 'เพิ่ม Mobility' : ''
+    ].filter(Boolean).join('\n• ');
+
+    const profile = `เพศ ${req.user.gender || '-'} • เกิด ${req.user.date_of_birth || '-'}`;
+    const prompt = `คุณเป็นโค้ชฟิตเนส พูดไทยสั้น กระชับ ชัดเจน\nโปรไฟล์ผู้ใช้: ${profile}\nข้อกำหนดแผน:\n• ${constraints}\nงาน: ออกแบบพรีวิวแผนฝึกตามสัปดาห์ โดยแจกแจงชื่อวัน (Day 1..), โฟกัสของวัน และท่าหลัก 3–5 ท่า/วัน พร้อมช่วงแนะนำ RIR/เวลาพักโดยย่อ และเคล็ดลับสั้นท้ายสุด 1–2 บรรทัด\nรูปแบบผลลัพธ์: bullet ภาษาไทยที่อ่านง่าย ไม่ต้องใส่โค้ดหรือ JSON`;
+
+    const messages = [
+      { role: 'system', content: 'คุณคือผู้ช่วยโค้ชออกกำลังกายที่เน้นความปลอดภัยและความยั่งยืน ใช้ภาษาไทย' },
+      { role: 'user', content: prompt }
+    ];
+
+    const data = await callOpenAICompatible(messages, 0.6);
+    const meta = data?._meta || {};
+    const text = String(data?.choices?.[0]?.message?.content || '').trim();
+
+    if (meta?.blockReason) {
+      return res.json({ ok: false, error: { reason: 'BLOCKED', blockReason: meta.blockReason } });
+    }
+    if (String(meta?.finishReason) === 'MAX_TOKENS') {
+      return res.json({ ok: false, error: { reason: 'NON_STOP_FINISH', finish: meta.finishReason }, partialText: text, canContinue: true });
+    }
+    if (meta?.finishReason && String(meta.finishReason) !== 'STOP') {
+      return res.json({ ok: false, error: { reason: 'NON_STOP_FINISH', finish: meta.finishReason } });
+    }
+    if (!text) {
+      return res.json({ ok: false, error: { reason: 'EMPTY_OUTPUT' } });
+    }
+    return res.json({ ok: true, text });
+  } catch (err) {
+    if (AI_FALLBACK_ON_ERROR) {
+      console.warn('POST /api/ai/workout-suggest fallback used');
+      const fb = `สรุปพรีวิวแผนฝึก (โหมดออฟไลน์):\n• Full-Body x3 (45 นาที) + Core/คาร์ดิโอตามเหมาะสม\n• Day 1: Squat/Push/Pull + Plank\n• Day 2: Hinge/Lunge/Row + Dead Bug\n• Day 3: Push/Pull/Legs + Cardio 10 นาที\nคำแนะนำ: เริ่มเบาๆ เพิ่มปริมาณทีละน้อย เน้นฟอร์มและการพักผ่อนให้พอ`; 
+      return res.json({ ok: true, text: fb });
+    }
+    console.error('POST /api/ai/workout-suggest error', err?.response?.data || err?.message || err);
+    return res.status(500).json({ error: 'ai error' });
+  }
+});
+
 // Quick provider health: list available models and methods
 app.get('/api/ai/models', async (_req, res) => {
   try {

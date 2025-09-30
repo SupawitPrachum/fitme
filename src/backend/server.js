@@ -2185,6 +2185,10 @@ app.post('/api/ai/workout-suggest', requireAuth, async (req, res) => {
     const addCore = Boolean(p.addCore);
     const addMobility = Boolean(p.addMobility);
 
+    const injuries = Array.isArray(p.injuries) ? p.injuries : [];
+    const restricted = Array.isArray(p.restrictedMoves) ? p.restrictedMoves : [];
+    const intensity = String(p.intensityMode || '').trim();
+
     const constraints = [
       `วันต่อสัปดาห์: ${days}`,
       `เวลาต่อครั้ง: ${mins} นาที`,
@@ -2193,11 +2197,14 @@ app.post('/api/ai/workout-suggest', requireAuth, async (req, res) => {
       `เป้าหมาย: ${goal}`,
       addCardio ? 'เพิ่มคาร์ดิโอ' : '',
       addCore ? 'เพิ่ม Core' : '',
-      addMobility ? 'เพิ่ม Mobility' : ''
+      addMobility ? 'เพิ่ม Mobility' : '',
+      intensity ? `โหมดความหนัก: ${intensity} (ปรับ sets/reps/rest ให้เหมาะสม)` : '',
+      injuries.length ? `อาการบาดเจ็บ: ${injuries.join(', ')}` : '',
+      restricted.length ? `ท่าที่ควรเลี่ยง: ${restricted.join(', ')}` : ''
     ].filter(Boolean).join('\n• ');
 
     const profile = `เพศ ${req.user.gender || '-'} • เกิด ${req.user.date_of_birth || '-'}`;
-    const prompt = `คุณเป็นโค้ชฟิตเนส พูดไทยสั้น กระชับ ชัดเจน\nโปรไฟล์ผู้ใช้: ${profile}\nข้อกำหนดแผน:\n• ${constraints}\nงาน: ออกแบบพรีวิวแผนฝึกตามสัปดาห์ โดยแจกแจงชื่อวัน (Day 1..), โฟกัสของวัน และท่าหลัก 3–5 ท่า/วัน พร้อมช่วงแนะนำ RIR/เวลาพักโดยย่อ และเคล็ดลับสั้นท้ายสุด 1–2 บรรทัด\nรูปแบบผลลัพธ์: bullet ภาษาไทยที่อ่านง่าย ไม่ต้องใส่โค้ดหรือ JSON`;
+    const prompt = `คุณเป็นโค้ชฟิตเนส พูดไทยสั้น กระชับ ชัดเจน\nโปรไฟล์ผู้ใช้: ${profile}\nข้อกำหนดแผน:\n• ${constraints}\nงาน: ออกแบบพรีวิวแผนฝึกตามสัปดาห์ โดยแจกแจงชื่อวัน (Day 1..), โฟกัสของวัน และท่าหลัก 3–5 ท่า/วัน พร้อมช่วงแนะนำ RIR/เวลาพักโดยย่อ และเคล็ดลับสั้นท้ายสุด 1–2 บรรทัด\nหมายเหตุ: หลีกเลี่ยงท่าที่กระทบอาการบาดเจ็บและ 'ท่าที่ควรเลี่ยง' โดยเลือกทางเลือกที่ปลอดภัยแทน\nรูปแบบผลลัพธ์: bullet ภาษาไทยที่อ่านง่าย ไม่ต้องใส่โค้ดหรือ JSON`;
 
     const messages = [
       { role: 'system', content: 'คุณคือผู้ช่วยโค้ชออกกำลังกายที่เน้นความปลอดภัยและความยั่งยืน ใช้ภาษาไทย' },
@@ -2247,6 +2254,10 @@ app.post('/api/ai/workout-plan', requireAuth, async (req, res) => {
     };
 
     // Build prompt requiring strict JSON
+    const injuries = Array.isArray(prefs.injuries) ? prefs.injuries : [];
+    const restricted = Array.isArray(prefs.restrictedMoves) ? prefs.restrictedMoves : [];
+    const intensity = String(prefs.intensityMode || '').trim();
+
     const constraints = [
       `วัน/สัปดาห์: ${prefs.daysPerWeek}`,
       `เวลา/ครั้ง: ${prefs.minutesPerSession} นาที`,
@@ -2256,11 +2267,14 @@ app.post('/api/ai/workout-plan', requireAuth, async (req, res) => {
       prefs.addCardio ? 'เพิ่มคาร์ดิโอ' : '',
       prefs.addCore ? 'เพิ่ม Core' : '',
       prefs.addMobility ? 'เพิ่ม Mobility' : '',
+      intensity ? `โหมดความหนัก: ${intensity} (กำหนดเรป/พัก/จำนวนเซ็ตตามโหมด)` : '',
+      injuries.length ? `อาการบาดเจ็บ: ${injuries.join(', ')}` : '',
+      restricted.length ? `ท่าที่ควรเลี่ยง: ${restricted.join(', ')}` : '',
     ].filter(Boolean).join('\n• ');
 
     const profile = `เพศ ${req.user.gender || '-'} • เกิด ${req.user.date_of_birth || '-'}`;
     const sys = 'คุณคือโค้ชออกกำลังกายที่ให้คำแนะนำปลอดภัยและยั่งยืน ใช้ภาษาไทย';
-    const user = `โปรไฟล์ผู้ใช้: ${profile}\nข้อกำหนด:\n• ${constraints}\n\nงาน: สร้างแผนฝึกรายสัปดาห์แบบ JSON เท่านั้น ไม่ใส่คำอธิบายอื่นนอกจาก JSON โดยมีโครงสร้างดังนี้:\n{\n  "title": "string ไทยสั้นกระชับ",\n  "progression": ["string"...],\n  "deloadAdvice": "string",\n  "days": [\n    {\n      "dayOrder": 1,\n      "focus": "Full-Body|Upper|Lower|Push|Pull|Legs|Conditioning",\n      "warmup": "string",\n      "cooldown": "string",\n      "exercises": [\n        {"name": "string", "sets": 3, "repsOrTime": "8–12", "restSec": 60, "notes": "RIR 1–2"}\n      ]\n    }\n  ]\n}\nเงื่อนไข: สร้างตามจำนวนวัน ${prefs.daysPerWeek} วัน และเวลาต่อครั้ง ${prefs.minutesPerSession} นาที โดยประมาณ`;
+    const user = `โปรไฟล์ผู้ใช้: ${profile}\nข้อกำหนด:\n• ${constraints}\n\nงาน: สร้างแผนฝึกรายสัปดาห์แบบ JSON เท่านั้น ไม่ใส่คำอธิบายอื่นนอกจาก JSON โดยมีโครงสร้างดังนี้:\n{\n  "title": "string ไทยสั้นกระชับ",\n  "progression": ["string"...],\n  "deloadAdvice": "string",\n  "days": [\n    {\n      "dayOrder": 1,\n      "focus": "Full-Body|Upper|Lower|Push|Pull|Legs|Conditioning",\n      "warmup": "string",\n      "cooldown": "string",\n      "exercises": [\n        {"name": "string", "sets": 3, "repsOrTime": "8–12", "restSec": 60, "notes": "RIR 1–2"}\n      ]\n    }\n  ]\n}\nเงื่อนไข: สร้างตามจำนวนวัน ${prefs.daysPerWeek} วัน และเวลาต่อครั้ง ${prefs.minutesPerSession} นาที โดยประมาณ\nหมายเหตุ: หลีกเลี่ยงท่าที่กระทบอาการบาดเจ็บ/รายการที่ควรเลี่ยง หากจำเป็นให้เลือกทางเลือกที่ปลอดภัย และปรับเรป/พัก/จำนวนเซ็ตตามโหมดความหนัก`;
 
     let aiPlan = null;
     try {

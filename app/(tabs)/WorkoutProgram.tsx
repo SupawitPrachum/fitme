@@ -47,6 +47,9 @@ type Prefs = {
   addCardio: boolean;
   addCore: boolean;
   addMobility: boolean;
+  injuries?: string[]; // e.g., ['knee','shoulder','lower_back','wrist','elbow']
+  restrictedMoves?: string[]; // custom exercise keywords to avoid
+  intensityMode?: 'heavy' | 'medium' | 'light';
 };
 
 const defaultPrefs: Prefs = {
@@ -58,6 +61,9 @@ const defaultPrefs: Prefs = {
   addCardio: true,
   addCore: true,
   addMobility: true,
+  injuries: [],
+  restrictedMoves: [],
+  intensityMode: 'medium',
 };
 
 type PlanBlock = {
@@ -183,6 +189,9 @@ const genExercisesForDay = (focus: string, p: Prefs): PlanExercise[] => {
   const L = p.level;
   const withCore = p.addCore || /core/i.test(focus);
   const withCardio = p.addCardio || /cardio|condition/i.test(focus);
+  const injuries = (p.injuries || []).map(s => String(s).toLowerCase());
+  const restricted = (p.restrictedMoves || []).map(s => String(s).toLowerCase());
+  const mode = p.intensityMode || 'medium';
 
   const move = {
     squat: E === 'none' ? 'Bodyweight Squat' : E === 'minimal' ? 'DB Goblet Squat' : 'Barbell Back Squat',
@@ -195,30 +204,95 @@ const genExercisesForDay = (focus: string, p: Prefs): PlanExercise[] => {
     core1: 'Plank', core2: 'Dead Bug', cardio: 'Bike/Row/Jog (steady)'
   } as const;
 
-  const rx = (base: string) => {
-    if (L === 'beginner') return { sets: 3, repsOrTime: base, restSec: 60, notes: 'RIR 2–3' };
-    if (L === 'advanced') return { sets: 4, repsOrTime: base, restSec: 90, notes: 'RIR 0–1' };
-    return { sets: 3, repsOrTime: base, restSec: 75, notes: 'RIR 1–2' };
+  const presc = () => {
+    if (mode === 'heavy') {
+      const sets = L === 'advanced' ? 5 : L === 'intermediate' ? 4 : 3;
+      const rir  = L === 'advanced' ? 'RIR 0–1' : L === 'intermediate' ? 'RIR 1–2' : 'RIR 2–3';
+      return { sets, reps: '4–6', rest: 120, rir } as const;
+    }
+    if (mode === 'light') {
+      const sets = L === 'advanced' ? 3 : 3;
+      const rir  = L === 'advanced' ? 'RIR 2' : L === 'intermediate' ? 'RIR 2–3' : 'RIR 3–4';
+      return { sets, reps: '12–15', rest: 60, rir } as const;
+    }
+    // medium
+    const sets = L === 'advanced' ? 4 : 3;
+    const rir  = L === 'advanced' ? 'RIR 1' : L === 'intermediate' ? 'RIR 1–2' : 'RIR 2–3';
+    return { sets, reps: '8–10', rest: 90, rir } as const;
+  };
+
+  const prescribe = (base: string) => {
+    const pr = presc();
+    return { sets: pr.sets, repsOrTime: base || pr.reps, restSec: pr.rest, notes: pr.rir };
+  };
+
+  const isUnsafe = (name: string) => {
+    const n = name.toLowerCase();
+    const hitRestricted = restricted.some(k => k && n.includes(k));
+    const has = (inj: string) => injuries.includes(inj);
+    const keyword = (kw: string) => n.includes(kw);
+    if (hitRestricted) return true;
+    if (has('knee') && (keyword('squat') || keyword('lunge') || keyword('step') || keyword('jump'))) return true;
+    if (has('shoulder') && (keyword('overhead') || keyword('pike') || keyword('shoulder press'))) return true;
+    if (has('lower_back') && (keyword('deadlift') || keyword('rdl') || keyword('good morning') || keyword('barbell row'))) return true;
+    if (has('wrist') && (keyword('push-up') || keyword('plank') || keyword('handstand') || keyword('dip'))) return true;
+    if (has('elbow') && (keyword('triceps') || keyword('dip')) ) return true;
+    return false;
+  };
+
+  const altFor = (name: string) => {
+    const n = name.toLowerCase();
+    const has = (inj: string) => injuries.includes(inj);
+    if (has('knee')) {
+      if (n.includes('squat')) return E === 'none' ? 'Wall Sit' : E === 'minimal' ? 'DB Box Squat (high box)' : 'Leg Press (light range)';
+      if (n.includes('lunge')) return E === 'none' ? 'Glute Bridge' : 'Hip Thrust';
+    }
+    if (has('shoulder')) {
+      if (n.includes('overhead') || n.includes('shoulder press') || n.includes('pike')) return E === 'none' ? 'Incline Push-up' : 'DB Lateral Raise (light)';
+    }
+    if (has('lower_back')) {
+      if (n.includes('deadlift') || n.includes('rdl') || n.includes('good morning')) return E === 'none' ? 'Glute Bridge' : 'Hip Thrust';
+      if (n.includes('row')) return E === 'none' ? 'Door Row (knees bent)' : 'Chest-supported Row';
+    }
+    if (has('wrist')) {
+      if (n.includes('push-up') || n.includes('plank')) return E === 'minimal' ? 'DB Chest Press' : E === 'fullgym' ? 'Machine Chest Press' : 'Wall Push-up (neutral wrist)';
+    }
+    if (has('elbow')) {
+      if (n.includes('triceps') || n.includes('dip')) return E === 'minimal' ? 'Cable/Band Pushdown (light)' : 'DB Floor Press (close grip, light)';
+    }
+    // fallback to original
+    return name;
   };
 
   const out: PlanExercise[] = [];
-  const add = (name?: string, preset?: Partial<PlanExercise>) => { if (!name) return; out.push({ name, ...preset }); };
+  const add = (name?: string, preset?: Partial<PlanExercise>) => {
+    if (!name) return;
+    const safe = isUnsafe(name) ? altFor(name) : name;
+    out.push({ name: safe, ...preset });
+  };
   if (/Full-Body/i.test(focus)) {
-    add(move.squat, rx('8–12')); add(move.push_h, rx('8–12')); add(move.pull_h, rx('8–12')); add(move.hinge, rx('8–12'));
+    const pr = presc();
+    add(move.squat, prescribe(pr.reps)); add(move.push_h, prescribe(pr.reps)); add(move.pull_h, prescribe(pr.reps)); add(move.hinge, prescribe(pr.reps));
   } else if (/Upper/i.test(focus)) {
-    add(move.push_h, rx('8–12')); add(move.pull_h, rx('8–12')); add(move.push_v, rx('8–12')); add(move.pull_v, rx('8–12'));
+    const pr = presc();
+    add(move.push_h, prescribe(pr.reps)); add(move.pull_h, prescribe(pr.reps)); add(move.push_v, prescribe(pr.reps)); add(move.pull_v, prescribe(pr.reps));
   } else if (/Lower/i.test(focus)) {
-    add(move.squat, rx('6–10')); add(move.hinge, rx('8–12')); add(move.lunge, rx('10–12/side'));
+    const pr = presc();
+    add(move.squat, prescribe(pr.reps)); add(move.hinge, prescribe(pr.reps)); add(move.lunge, prescribe(pr.reps));
   } else if (/Push/i.test(focus) && !/Pull/i.test(focus)) {
-    add(move.push_h, rx('6–10')); add(move.push_v, rx('8–12'));
+    const pr = presc();
+    add(move.push_h, prescribe(pr.reps)); add(move.push_v, prescribe(pr.reps));
   } else if (/Pull/i.test(focus) && !/Push/i.test(focus)) {
-    add(move.pull_h, rx('6–10')); add(move.pull_v, rx('8–12'));
+    const pr = presc();
+    add(move.pull_h, prescribe(pr.reps)); add(move.pull_v, prescribe(pr.reps));
   } else if (/Legs/i.test(focus)) {
-    add(move.squat, rx('6–10')); add(move.lunge, rx('10–12/side')); add(move.hinge, rx('8–12'));
+    const pr = presc();
+    add(move.squat, prescribe(pr.reps)); add(move.lunge, prescribe(pr.reps)); add(move.hinge, prescribe(pr.reps));
   } else if (/Conditioning|Cardio/i.test(focus)) {
     add(move.cardio, { sets: 1, repsOrTime: '10–20m', restSec: 0, notes: 'Z2 steady' });
   } else {
-    add(move.squat, rx('8–12')); add(move.push_h, rx('8–12')); add(move.pull_h, rx('8–12'));
+    const pr = presc();
+    add(move.squat, prescribe(pr.reps)); add(move.push_h, prescribe(pr.reps)); add(move.pull_h, prescribe(pr.reps));
   }
   if (withCore) add(move.core1, { sets: 3, repsOrTime: '30s', restSec: 45, notes: 'bracing' });
   if (withCardio) add(move.cardio, { sets: 1, repsOrTime: '8–12m', restSec: 0, notes: 'easy pace' });
@@ -798,6 +872,43 @@ export default function WorkoutProgram() {
           <Pill label="มือใหม่" active={prefs.level === 'beginner'} onPress={() => change('level', 'beginner')} />
           <Pill label="กลาง" active={prefs.level === 'intermediate'} onPress={() => change('level', 'intermediate')} />
           <Pill label="สูง" active={prefs.level === 'advanced'} onPress={() => change('level', 'advanced')} />
+        </View>
+      </Section>
+
+      {/* Injuries / Restrictions */}
+      <Section title="อาการบาดเจ็บ/ข้อจำกัด" note="ระบบจะหลีกเลี่ยงท่าที่เสี่ยงและเลือกทางเลือกให้">
+        <View style={styles.rowWrap}>
+          {['knee','shoulder','lower_back','wrist','elbow'].map((inj) => (
+            <Pill
+              key={inj}
+              label={inj === 'knee' ? 'เข่า' : inj === 'shoulder' ? 'ไหล่' : inj === 'lower_back' ? 'หลังล่าง' : inj === 'wrist' ? 'ข้อมือ' : 'ข้อศอก'}
+              active={Array.isArray(prefs.injuries) && prefs.injuries.includes(inj)}
+              onPress={() => {
+                const cur = new Set(prefs.injuries || []);
+                cur.has(inj) ? cur.delete(inj) : cur.add(inj);
+                change('injuries', Array.from(cur));
+              }}
+            />
+          ))}
+        </View>
+        <Text style={styles.helper}>ท่าที่อยากหลีกเลี่ยง (คั่นด้วยจุลภาค):</Text>
+        <TextInput
+          value={(prefs.restrictedMoves || []).join(', ')}
+          onChangeText={(v) => {
+            const arr = v.split(',').map(s => s.trim()).filter(Boolean);
+            change('restrictedMoves', arr);
+          }}
+          placeholder="เช่น Squat, Overhead Press, Deadlift"
+          style={[styles.askInput, { marginTop: 6 }]}
+        />
+      </Section>
+
+      {/* Intensity Mode */}
+      <Section title="ความหนักของแผน (Intensity)" note="มีผลต่อ เรป/เวลาพัก/จำนวนเซ็ต">
+        <View style={styles.rowWrap}>
+          <Pill label="หนัก" active={prefs.intensityMode === 'heavy'} onPress={() => change('intensityMode','heavy')} />
+          <Pill label="ปานกลาง" active={(prefs.intensityMode || 'medium') === 'medium'} onPress={() => change('intensityMode','medium')} />
+          <Pill label="เบา" active={prefs.intensityMode === 'light'} onPress={() => change('intensityMode','light')} />
         </View>
       </Section>
 
